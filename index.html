@@ -69,6 +69,316 @@
 
 </head>
 <body>
-  <!-- HTML truncated for brevity -->
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div class="logo">MM</div>
+        <div>
+          <h1>Mess Mate</h1>
+          <p class="lead">Check the weekly mess menu, rate meals & send anonymous feedback</p>
+        </div>
+      </div>
+      <div class="pill">
+        <span class="badge">Anonymous feedback</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <select id="filter-type" class="select">
+                <option value="all">All</option>
+                <option value="veg">Veg</option>
+                <option value="nonveg">Non-Veg</option>
+                <option value="special">Special</option>
+              </select>
+            </div>
+            <div class="small">Week: <span id="weekRange">—</span></div>
+          </div>
+
+          <div class="week" id="days"></div>
+
+          <div class="meals" id="meals"></div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3 style="margin:0 0 8px 0">Top meals this week</h3>
+          <div id="topMeals" class="stat-list"></div>
+        </div>
+
+      </div>
+
+      <aside class="sidebar">
+        <div class="card">
+          <div class="section">
+            <h3 style="margin:0 0 6px 0">Send anonymous feedback</h3>
+            <textarea id="feedbackText" placeholder="Write your suggestion or complaint (anonymous)"></textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+              <button class="btn primary" id="sendFeedback">Send</button>
+              <button class="btn" id="generatePolite">Generate polite suggestion</button>
+            </div>
+            <p class="small" style="margin-top:8px">Your feedback is stored locally in your browser and shown to admins when they open the admin area.</p>
+          </div>
+
+          <div class="section">
+            <h3 style="margin:0 0 6px 0">Weekly stats</h3>
+            <div id="stats" class="stat-list"></div>
+          </div>
+
+          <div class="section">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <h3 style="margin:0">Admin</h3>
+              <div class="admin-toggle" id="adminToggle">Open</div>
+            </div>
+
+            <div class="admin" id="adminArea">
+              <p class="small">Add / edit the weekly menu. Changes are saved locally (for demo). Use this area to simulate admin updates.</p>
+              <div class="menu-list" id="adminMenu"></div>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn mini" id="addDay">Add day</button>
+                <button class="btn mini" id="resetData">Reset data</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+    </div>
+
+    <footer>Save this file as <code>mess-menu.html</code> and open in a browser or use an online editor (CodePen / JSFiddle / Replit). Data is stored in your browser's localStorage.</footer>
+  </div>
+
+  <script>
+    // Basic data model & persistence
+    const DEFAULT_MENU = [
+      {day:'Monday', meals:[{time:'Breakfast',name:'Poha',type:'veg'},{time:'Lunch',name:'Paneer Butter Masala',type:'veg'},{time:'Dinner',name:'Chicken Curry',type:'nonveg'}]},
+      {day:'Tuesday', meals:[{time:'Breakfast',name:'Idli Sambhar',type:'veg'},{time:'Lunch',name:'Mixed Veg',type:'veg'},{time:'Dinner',name:'Fish Fry',type:'nonveg'}]},
+      {day:'Wednesday', meals:[{time:'Breakfast',name:'Paratha',type:'veg'},{time:'Lunch',name:'Rajma',type:'veg'},{time:'Dinner',name:'Egg Curry',type:'nonveg'}]},
+      {day:'Thursday', meals:[{time:'Breakfast',name:'Upma',type:'veg'},{time:'Lunch',name:'Chole',type:'veg'},{time:'Dinner',name:'Mutton Curry',type:'nonveg'}]},
+      {day:'Friday', meals:[{time:'Breakfast',name:'Dosa',type:'veg'},{time:'Lunch',name:'Vegetable Biryani',type:'veg'},{time:'Dinner',name:'Paneer Tikka',type:'veg'}]},
+      {day:'Saturday', meals:[{time:'Breakfast',name:'Bread Omelette',type:'nonveg'},{time:'Lunch',name:'Chicken Biryani',type:'nonveg'},{time:'Dinner',name:'Mixed Grill',type:'nonveg'}]},
+      {day:'Sunday', meals:[{time:'Breakfast',name:'Aloo Puri',type:'veg'},{time:'Lunch',name:'Special Thali',type:'special'},{time:'Dinner',name:'Leftovers',type:'veg'}]},
+    ];
+
+    const STORAGE_KEY = 'mess_menu_v1';
+    const RATINGS_KEY = 'mess_ratings_v1';
+    const FEEDBACK_KEY = 'mess_feedback_v1';
+
+    function loadOrDefault(key, def){
+      const raw = localStorage.getItem(key);
+      if(!raw) return def;
+      try{return JSON.parse(raw)}catch(e){return def}
+    }
+
+    let menu = loadOrDefault(STORAGE_KEY, DEFAULT_MENU);
+    let ratings = loadOrDefault(RATINGS_KEY, {}); // { 'Monday|Breakfast|Poha': {scoreSum:12, count:3, thumbsUp:2, thumbsDown:1}}
+    let feedbacks = loadOrDefault(FEEDBACK_KEY, []);
+
+    // UI references
+    const daysEl = document.getElementById('days');
+    const mealsEl = document.getElementById('meals');
+    const filterTypeEl = document.getElementById('filter-type');
+    const weekRangeEl = document.getElementById('weekRange');
+    const statsEl = document.getElementById('stats');
+    const topMealsEl = document.getElementById('topMeals');
+
+    // admin
+    const adminToggle = document.getElementById('adminToggle');
+    const adminArea = document.getElementById('adminArea');
+    const adminMenu = document.getElementById('adminMenu');
+
+    // feedback
+    const feedbackText = document.getElementById('feedbackText');
+    const sendFeedback = document.getElementById('sendFeedback');
+    const generatePolite = document.getElementById('generatePolite');
+
+    // init
+    let selectedDayIndex = 0;
+    let filterType = 'all';
+
+    function saveAll(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(menu));
+      localStorage.setItem(RATINGS_KEY, JSON.stringify(ratings));
+      localStorage.setItem(FEEDBACK_KEY, JSON.stringify(feedbacks));
+    }
+
+    function renderDays(){
+      daysEl.innerHTML='';
+      menu.forEach((d,i)=>{
+        const btn = document.createElement('button');
+        btn.className='day-pill'+(i===selectedDayIndex? ' active':'');
+        btn.textContent=d.day;
+        btn.onclick = ()=>{ selectedDayIndex=i; render(); };
+        daysEl.appendChild(btn);
+      });
+      const start = menu[0].day; const end = menu[menu.length-1].day;
+      weekRangeEl.textContent = start + ' — ' + end;
+    }
+
+    function mealKey(day,time,name){ return `${day}|${time}|${name}` }
+
+    function getMealRating(key){ return ratings[key] || {scoreSum:0,count:0,thumbsUp:0,thumbsDown:0} }
+
+    function renderMeals(){
+      mealsEl.innerHTML='';
+      const day = menu[selectedDayIndex];
+      day.meals.filter(m=> filterType==='all' || m.type===filterType).forEach(m=>{
+        const key = mealKey(day.day,m.time,m.name);
+        const r = getMealRating(key);
+        const avg = r.count? (r.scoreSum / r.count).toFixed(1): '—';
+
+        const el = document.createElement('div'); el.className='meal';
+        el.innerHTML = `
+          <div style="flex:1">
+            <h3>${m.time} — ${m.name}</h3>
+            <div class="meta">${m.type.toUpperCase()}</div>
+            <div class="rating-row">
+              <div class="stars" data-key="${key}">
+                <span class="star" data-score="1">1</span>
+                <span class="star" data-score="2">2</span>
+                <span class="star" data-score="3">3</span>
+                <span class="star" data-score="4">4</span>
+                <span class="star" data-score="5">5</span>
+              </div>
+              <div class="small muted">Avg: <strong>${avg}</strong> (${r.count})</div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+              <button class="btn" data-thumb="up" data-key="${key}">👍 ${r.thumbsUp||0}</button>
+              <button class="btn" data-thumb="down" data-key="${key}">👎 ${r.thumbsDown||0}</button>
+            </div>
+          </div>
+        `;
+        mealsEl.appendChild(el);
+      });
+
+      // attach star clicks
+      Array.from(document.querySelectorAll('.star')).forEach(s=>{
+        s.onclick = (ev)=>{
+          const score = Number(ev.target.getAttribute('data-score'));
+          const key = ev.target.parentElement.getAttribute('data-key');
+          const cur = getMealRating(key);
+          cur.scoreSum += score; cur.count = (cur.count||0)+1; ratings[key]=cur; saveAll(); render();
+        }
+      });
+
+      // thumbs
+      Array.from(document.querySelectorAll('button[data-thumb]')).forEach(b=>{
+        b.onclick = (ev)=>{
+          const which = ev.target.getAttribute('data-thumb');
+          const key = ev.target.getAttribute('data-key');
+          const cur = getMealRating(key);
+          if(which==='up') cur.thumbsUp=(cur.thumbsUp||0)+1; else cur.thumbsDown=(cur.thumbsDown||0)+1;
+          ratings[key]=cur; saveAll(); render();
+        }
+      });
+    }
+
+    function computeStats(){
+      const keys = Object.keys(ratings);
+      let totalRatings=0, totalMeals=0;
+      let arr = [];
+      keys.forEach(k=>{
+        const r = ratings[k];
+        if(r.count){ arr.push({key:k, avg:r.scoreSum/r.count, count:r.count, thumbsUp:r.thumbsUp||0, thumbsDown:r.thumbsDown||0}) }
+      });
+      arr.sort((a,b)=> b.avg - a.avg);
+      return {totalRatings: arr.reduce((s,a)=>s+a.count,0), mealsRated:arr.length, top:arr.slice(0,5), worst: arr.slice(-5).reverse() }
+    }
+
+    function renderStats(){
+      const s = computeStats();
+      statsEl.innerHTML = '';
+      const totals = document.createElement('div'); totals.className='stat-item'; totals.innerHTML = `<div class="muted">Ratings this week</div><div><strong>${s.totalRatings}</strong></div>`;
+      statsEl.appendChild(totals);
+      const rated = document.createElement('div'); rated.className='stat-item'; rated.innerHTML = `<div class="muted">Meals rated</div><div><strong>${s.mealsRated}</strong></div>`;
+      statsEl.appendChild(rated);
+
+      // top 3
+      topMealsEl.innerHTML='';
+      if(s.top.length===0){ topMealsEl.innerHTML='<div class="muted">No ratings yet</div>' }
+      s.top.forEach(t=>{
+        const row = document.createElement('div'); row.className='stat-item';
+        row.innerHTML = `<div>${t.key.split('|').slice(0,2).join(' — ')}</div><div><strong>${t.avg.toFixed(1)}</strong> (${t.count})</div>`;
+        topMealsEl.appendChild(row);
+      });
+
+    }
+
+    function renderAdmin(){
+      adminMenu.innerHTML='';
+      menu.forEach((d,di)=>{
+        const wrap = document.createElement('div'); wrap.className='menu-item';
+        const label = document.createElement('input'); label.value = d.day; label.placeholder='Day name';
+        label.onchange = ()=>{ d.day = label.value; saveAll(); render(); };
+        wrap.appendChild(label);
+        const editBtn = document.createElement('button'); editBtn.className='btn mini'; editBtn.textContent='Edit meals';
+        editBtn.onclick = ()=>{ openEditMeals(di); };
+        wrap.appendChild(editBtn);
+        const delBtn = document.createElement('button'); delBtn.className='btn mini'; delBtn.textContent='Delete';
+        delBtn.onclick = ()=>{ if(confirm('Delete this day?')){ menu.splice(di,1); saveAll(); render(); } };
+        wrap.appendChild(delBtn);
+        adminMenu.appendChild(wrap);
+      });
+    }
+
+    function openEditMeals(index){
+      const d = menu[index];
+      const modal = document.createElement('div'); modal.className='card'; modal.style.position='fixed'; modal.style.left='50%'; modal.style.top='50%'; modal.style.transform='translate(-50%,-50%)'; modal.style.zIndex=9999; modal.style.width='680px';
+      modal.innerHTML = `<h3>Edit meals for ${d.day}</h3><div style="max-height:360px;overflow:auto;margin-top:8px" id="editMealsArea"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" id="saveMeals">Save</button><button class="btn" id="closeModal">Close</button></div>`;
+      document.body.appendChild(modal);
+      const area = modal.querySelector('#editMealsArea');
+      function redraw(){ area.innerHTML=''; d.meals.forEach((m,mi)=>{
+        const row = document.createElement('div'); row.className='menu-item';
+        const t = document.createElement('input'); t.value=m.time; t.onchange=()=>{ m.time=t.value };
+        const n = document.createElement('input'); n.value=m.name; n.onchange=()=>{ m.name=n.value };
+        const ty = document.createElement('select'); ty.innerHTML="<option value='veg'>Veg</option><option value='nonveg'>Non-Veg</option><option value='special'>Special</option>"; ty.value=m.type; ty.onchange=()=>{ m.type=ty.value };
+        const del = document.createElement('button'); del.className='btn mini'; del.textContent='Remove'; del.onclick=()=>{ d.meals.splice(mi,1); redraw(); };
+        row.appendChild(t); row.appendChild(n); row.appendChild(ty); row.appendChild(del);
+        area.appendChild(row);
+      }) }
+      redraw();
+      modal.querySelector('#saveMeals').onclick = ()=>{ saveAll(); document.body.removeChild(modal); render(); };
+      modal.querySelector('#closeModal').onclick = ()=>{ document.body.removeChild(modal); };
+    }
+
+    // feedback handling
+    sendFeedback.onclick = ()=>{
+      const text = feedbackText.value.trim();
+      if(!text) return alert('Please write something');
+      feedbacks.push({text, created:Date.now()}); saveAll(); feedbackText.value=''; alert('Feedback saved locally (admin can view it)'); render();
+    }
+
+    // simple polite suggestion generator - templates only (no external AI)
+    generatePolite.onclick = ()=>{
+      const t = feedbackText.value.trim();
+      if(!t) return alert('Write your raw feedback first, then click Generate');
+      // naive rephrase: make it shorter and polite
+      const polite = `Hello Team, I wanted to share a suggestion: ${t.replace(/\s+/g,' ').trim()}. Thank you for considering this.`;
+      feedbackText.value = polite; alert('Polite suggestion generated — you can edit before sending.');
+    }
+
+    // admin toggles
+    adminToggle.onclick = ()=>{
+      adminArea.classList.toggle('open'); adminToggle.textContent = adminArea.classList.contains('open')? 'Close' : 'Open'; renderAdmin(); }
+
+    // add day
+    document.getElementById('addDay').onclick = ()=>{
+      const name = prompt('Day name (e.g. Holiday)')||'NewDay';
+      menu.push({day:name, meals:[]}); saveAll(); render();
+    }
+
+    document.getElementById('resetData').onclick = ()=>{ if(confirm('Reset demo data?')){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(RATINGS_KEY); localStorage.removeItem(FEEDBACK_KEY); menu=DEFAULT_MENU; ratings={}; feedbacks=[]; saveAll(); render(); } }
+
+    // filter change
+    filterTypeEl.onchange = ()=>{ filterType = filterTypeEl.value; render(); }
+
+    function render(){ renderDays(); renderMeals(); renderStats(); renderAdmin(); }
+
+    // initial render
+    render();
+
+  </script>
 </body>
 </html>
